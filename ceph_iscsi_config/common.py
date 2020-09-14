@@ -98,8 +98,20 @@ class Config(object):
 
         if self.init_config():
             self.config = self.get_config()
+            if not self.config_locked:
+                self.lock()
             self._upgrade_config()
+            if self.config_locked:
+                self.unlock()
             self.changed = False
+
+    def __enter__(self):
+        if not self.config_locked:
+            self.lock()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.config_locked:
+            self.unlock()
 
     def _read_config_object(self, ioctx):
         """
@@ -506,7 +518,13 @@ class Config(object):
     def refresh(self):
         self.logger.debug("config refresh - current config is {}".format(self.config))
         self.config = self.get_config()
+        if not self.config_locked:
+            self.lock()
+
         self._upgrade_config()
+
+        if self.config_locked:
+            self.unlock()
 
     def add_item(self, cfg_type, element_name=None, initial_value=None):
         now = get_time()

@@ -543,153 +543,153 @@ class GWClient(GWObject):
         by the CLI->API->GWClient interaction
         """
         # Build a local object representing the rados configuration object
-        config_object = Config(self.logger)
-        if config_object.error:
-            self.error = True
-            self.error_msg = config_object.error_msg
-            return
-
-        # use current config to hold a copy of the current rados config
-        # object (dict)
-        self.current_config = config_object.config
-        target_config = self.current_config['targets'][self.target_iqn]
-        update_host = committer
-
-        self.logger.debug("GWClient.manage) update host to handle any config "
-                          "update is {}".format(update_host))
-
-        if rqst_type == "present":
-
-            ###################################################################
-            # Ensure the client exists in LIO                                 #
-            ###################################################################
-
-            # first look at the request to see if it matches the settings
-            # already in the config object - if so this is just a rerun, or a
-            # reboot so config object updates are not needed when we change
-            # the LIO environment
-            if self.iqn in target_config['clients'].keys():
-                self.metadata = target_config['clients'][self.iqn]
-                config_image_list = sorted(self.metadata['luns'].keys())
-
-                #
-                # Does the request match the current config?
-
-                auth_config = self.metadata['auth']
-                config_chap = CHAP(auth_config['username'],
-                                   auth_config['password'],
-                                   auth_config['password_encryption_enabled'])
-                if config_chap.error:
-                    self.error = True
-                    self.error_msg = config_chap.error_msg
-                    return
-                # extract the chap_mutual_str from the config object entry
-                config_chap_mutual = CHAP(auth_config['mutual_username'],
-                                          auth_config['mutual_password'],
-                                          auth_config['mutual_password_encryption_enabled'])
-                if config_chap_mutual.error:
-                    self.error = True
-                    self.error_msg = config_chap_mutual.error_msg
-                    return
-
-                if self.username == config_chap.user and \
-                   self.password == config_chap.password and \
-                   self.mutual_username == config_chap_mutual.user and \
-                   self.mutual_password == config_chap_mutual.password and \
-                   config_image_list == sorted(self.requested_images):
-                    self.commit_enabled = False
-            else:
-                # requested iqn is not in the config object
-                self.seed_config(config_object)
-                self.metadata = GWClient.seed_metadata
-
-            self.logger.debug("(manage) config updates to be applied from "
-                              "this host: {}".format(self.commit_enabled))
-
-            client_exists = self.exists()
-            self.define_client()
-            if self.error:
-                # unable to define the client!
+        with Config(self.logger) as config_object:
+            if config_object.error:
+                self.error = True
+                self.error_msg = config_object.error_msg
                 return
 
-            if client_exists and self.metadata["group_name"]:
-                # bypass setup_luns for existing clients that have an
-                # associated host group
-                pass
-            else:
-                # either the client didn't exist (new or boot time), or the
-                # group_name is not defined so run setup_luns for this client
-                disks_config = self.current_config['disks']
-                bad_images = self.validate_images(disks_config)
-                if not bad_images:
+            # use current config to hold a copy of the current rados config
+            # object (dict)
+            self.current_config = config_object.config
+            target_config = self.current_config['targets'][self.target_iqn]
+            update_host = committer
 
-                    self.setup_luns(disks_config)
-                    if self.error:
+            self.logger.debug("GWClient.manage) update host to handle any config "
+                              "update is {}".format(update_host))
+
+            if rqst_type == "present":
+
+                ###################################################################
+                # Ensure the client exists in LIO                                 #
+                ###################################################################
+
+                # first look at the request to see if it matches the settings
+                # already in the config object - if so this is just a rerun, or a
+                # reboot so config object updates are not needed when we change
+                # the LIO environment
+                if self.iqn in target_config['clients'].keys():
+                    self.metadata = target_config['clients'][self.iqn]
+                    config_image_list = sorted(self.metadata['luns'].keys())
+
+                    #
+                    # Does the request match the current config?
+
+                    auth_config = self.metadata['auth']
+                    config_chap = CHAP(auth_config['username'],
+                                       auth_config['password'],
+                                       auth_config['password_encryption_enabled'])
+                    if config_chap.error:
+                        self.error = True
+                        self.error_msg = config_chap.error_msg
                         return
+                    # extract the chap_mutual_str from the config object entry
+                    config_chap_mutual = CHAP(auth_config['mutual_username'],
+                                              auth_config['mutual_password'],
+                                              auth_config['mutual_password_encryption_enabled'])
+                    if config_chap_mutual.error:
+                        self.error = True
+                        self.error_msg = config_chap_mutual.error_msg
+                        return
+
+                    if self.username == config_chap.user and \
+                       self.password == config_chap.password and \
+                       self.mutual_username == config_chap_mutual.user and \
+                       self.mutual_password == config_chap_mutual.password and \
+                       config_image_list == sorted(self.requested_images):
+                        self.commit_enabled = False
                 else:
-                    # request for images to map to this client that haven't
-                    # been added to LIO yet!
-                    self.error = True
-                    self.error_msg = ("Non-existent images {} requested "
-                                      "for {}".format(bad_images, self.iqn))
+                    # requested iqn is not in the config object
+                    self.seed_config(config_object)
+                    self.metadata = GWClient.seed_metadata
+
+                self.logger.debug("(manage) config updates to be applied from "
+                                  "this host: {}".format(self.commit_enabled))
+
+                client_exists = self.exists()
+                self.define_client()
+                if self.error:
+                    # unable to define the client!
                     return
 
-            if not self.username and not self.password and \
-               not self.mutual_username and not self.mutual_password:
-                self.logger.warning("(main) client '{}' configured without"
-                                    " security".format(self.iqn))
+                if client_exists and self.metadata["group_name"]:
+                    # bypass setup_luns for existing clients that have an
+                    # associated host group
+                    pass
+                else:
+                    # either the client didn't exist (new or boot time), or the
+                    # group_name is not defined so run setup_luns for this client
+                    disks_config = self.current_config['disks']
+                    bad_images = self.validate_images(disks_config)
+                    if not bad_images:
 
-            self.configure_auth(self.username, self.password, self.mutual_username,
-                                self.mutual_password, target_config)
+                        self.setup_luns(disks_config)
+                        if self.error:
+                            return
+                    else:
+                        # request for images to map to this client that haven't
+                        # been added to LIO yet!
+                        self.error = True
+                        self.error_msg = ("Non-existent images {} requested "
+                                          "for {}".format(bad_images, self.iqn))
+                        return
 
-            if self.error:
-                return
+                if not self.username and not self.password and \
+                   not self.mutual_username and not self.mutual_password:
+                    self.logger.warning("(main) client '{}' configured without"
+                                        " security".format(self.iqn))
 
-            # check the client object's change count, and update the config
-            # object if this is the updating host
-            if self.change_count > 0:
+                self.configure_auth(self.username, self.password, self.mutual_username,
+                                    self.mutual_password, target_config)
 
-                if self.commit_enabled:
-
-                    if update_host == this_host():
-                        # update the config object with this clients settings
-                        self.logger.debug("Updating config object metadata "
-                                          "for '{}'".format(self.iqn))
-                        target_config['clients'][self.iqn] = self.metadata
-                        config_object.update_item("targets",
-                                                  self.target_iqn,
-                                                  target_config)
-
-                        # persist the config update
-                        config_object.commit()
-
-        elif rqst_type == 'reconfigure':
-            self.define_client()
-
-        else:
-            ###################################################################
-            # Remove the requested client from the config object and LIO      #
-            ###################################################################
-            if self.exists():
-                self.define_client()   # grab the client and parent tpg objects
-                self.delete()          # deletes from the local LIO instance
                 if self.error:
                     return
-                else:
-                    # remove this client from the config
 
-                    if update_host == this_host():
-                        self.logger.debug("Removing {} from the config "
-                                          "object".format(self.iqn))
-                        target_config['clients'].pop(self.iqn)
-                        config_object.update_item("targets", self.target_iqn, target_config)
-                        config_object.commit()
+                # check the client object's change count, and update the config
+                # object if this is the updating host
+                if self.change_count > 0:
+
+                    if self.commit_enabled:
+
+                        if update_host == this_host():
+                            # update the config object with this clients settings
+                            self.logger.debug("Updating config object metadata "
+                                              "for '{}'".format(self.iqn))
+                            target_config['clients'][self.iqn] = self.metadata
+                            config_object.update_item("targets",
+                                                      self.target_iqn,
+                                                      target_config)
+
+                            # persist the config update
+                            config_object.commit()
+
+            elif rqst_type == 'reconfigure':
+                self.define_client()
 
             else:
-                # desired state is absent, but the client does not exist
-                # in LIO - Nothing to do!
-                self.logger.info("(main) client {} removal request, but it's"
-                                 "not in LIO...skipping".format(self.iqn))
+                ###################################################################
+                # Remove the requested client from the config object and LIO      #
+                ###################################################################
+                if self.exists():
+                    self.define_client()   # grab the client and parent tpg objects
+                    self.delete()          # deletes from the local LIO instance
+                    if self.error:
+                        return
+                    else:
+                        # remove this client from the config
+
+                        if update_host == this_host():
+                            self.logger.debug("Removing {} from the config "
+                                              "object".format(self.iqn))
+                            target_config['clients'].pop(self.iqn)
+                            config_object.update_item("targets", self.target_iqn, target_config)
+                            config_object.commit()
+
+                else:
+                    # desired state is absent, but the client does not exist
+                    # in LIO - Nothing to do!
+                    self.logger.info("(main) client {} removal request, but it's"
+                                     "not in LIO...skipping".format(self.iqn))
 
     def validate_images(self, disks_config):
         """

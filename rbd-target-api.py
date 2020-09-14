@@ -76,7 +76,6 @@ def requires_restricted_auth(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
-
         # First check that the source of the request is actually valid
         gw_names = [gw for gw in config.config['gateways']
                     if isinstance(config.config['gateways'][gw], dict)]
@@ -1702,8 +1701,6 @@ def _targetauth(target_iqn=None):
 
     target = GWTarget(logger, target_iqn, [])
 
-    target_config = config.config['targets'][target_iqn]
-
     if target.exists():
         target.load_config()
         if action in ['disable_acl', 'enable_acl']:
@@ -1714,31 +1711,33 @@ def _targetauth(target_iqn=None):
             target.update_auth(tpg, username, password,
                                mutual_username, mutual_password)
 
-    if committing_host == local_gw:
-        if action in ['disable_acl', 'enable_acl']:
-            acl_enabled = (action == 'enable_acl')
-            target_config['acl_enabled'] = acl_enabled
-        else:
-            encryption_enabled = encryption_available()
-            auth_config = {
-                'username': '',
-                'password': '',
-                'password_encryption_enabled': encryption_enabled,
-                'mutual_username': '',
-                'mutual_password': '',
-                'mutual_password_encryption_enabled': encryption_enabled
-            }
-            if username != '':
-                chap = CHAP(username, password, encryption_enabled)
-                chap_mutual = CHAP(mutual_username, mutual_password, encryption_enabled)
-                auth_config['username'] = chap.user
-                auth_config['password'] = chap.encrypted_password(encryption_enabled)
-                auth_config['mutual_username'] = chap_mutual.user
-                auth_config['mutual_password'] = chap_mutual.encrypted_password(encryption_enabled)
-            target_config['auth'] = auth_config
+    with config.config['targets'][target_iqn] as target_config:
+#    target_config = config.config['targets'][target_iqn]
+        if committing_host == local_gw:
+            if action in ['disable_acl', 'enable_acl']:
+                acl_enabled = (action == 'enable_acl')
+                target_config['acl_enabled'] = acl_enabled
+            else:
+                encryption_enabled = encryption_available()
+                auth_config = {
+                    'username': '',
+                    'password': '',
+                    'password_encryption_enabled': encryption_enabled,
+                    'mutual_username': '',
+                    'mutual_password': '',
+                    'mutual_password_encryption_enabled': encryption_enabled
+                }
+                if username != '':
+                    chap = CHAP(username, password, encryption_enabled)
+                    chap_mutual = CHAP(mutual_username, mutual_password, encryption_enabled)
+                    auth_config['username'] = chap.user
+                    auth_config['password'] = chap.encrypted_password(encryption_enabled)
+                    auth_config['mutual_username'] = chap_mutual.user
+                    auth_config['mutual_password'] = chap_mutual.encrypted_password(encryption_enabled)
+                target_config['auth'] = auth_config
 
-        config.update_item('targets', target_iqn, target_config)
-        config.commit("retain")
+            config.update_item('targets', target_iqn, target_config)
+            config.commit("retain")
 
     return jsonify(message='OK'), 200
 

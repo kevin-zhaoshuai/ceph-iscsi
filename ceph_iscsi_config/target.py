@@ -577,181 +577,181 @@ class GWTarget(GWObject):
         :return: None - but sets the objects error flags to be checked by
                  the caller
         """
-        config = Config(self.logger)
-        if config.error:
-            self.error = True
-            self.error_msg = config.error_msg
-            return
-
-        local_gw = this_host()
-
-        if mode == 'target':
-
-            if self.exists():
-                self.load_config()
-                self.check_tpgs()
-            else:
-                self.create_target()
-
-            if self.error:
-                # return to caller, with error state set
+        with Config(self.logger) as config:
+            if config.error:
+                self.error = True
+                self.error_msg = config.error_msg
                 return
 
-            target_config = config.config["targets"][self.iqn]
-            self.update_acl(target_config['acl_enabled'])
+            local_gw = this_host()
 
-            discovery_auth_config = config.config['discovery_auth']
-            Discovery.set_discovery_auth_lio(discovery_auth_config['username'],
-                                             discovery_auth_config['password'],
-                                             discovery_auth_config['password_encryption_enabled'],
-                                             discovery_auth_config['mutual_username'],
-                                             discovery_auth_config['mutual_password'],
-                                             discovery_auth_config[
-                                                 'mutual_password_encryption_enabled'])
+            if mode == 'target':
 
-            gateway_group = config.config["gateways"].keys()
-            if "ip_list" not in target_config:
-                target_config['ip_list'] = self.gateway_ip_list
-                config.update_item("targets", self.iqn, target_config)
-                self.config_updated = True
+                if self.exists():
+                    self.load_config()
+                    self.check_tpgs()
+                else:
+                    self.create_target()
 
-            if self.controls != target_config.get('controls', {}):
-                target_config['controls'] = self.controls.copy()
-                config.update_item("targets", self.iqn, target_config)
-                self.config_updated = True
-
-            if local_gw not in gateway_group:
-                gateway_metadata = {"active_luns": 0}
-                config.add_item("gateways", local_gw)
-                config.update_item("gateways", local_gw, gateway_metadata)
-                self.config_updated = True
-
-            if local_gw not in target_config['portals']:
-                # Update existing gws with the new gw
-                for remote_gw, remote_gw_config in target_config['portals'].items():
-                    if remote_gw_config['gateway_ip_list'] == self.gateway_ip_list:
-                        continue
-
-                    inactive_portal_ip = list(self.gateway_ip_list)
-                    for portal_ip_address in remote_gw_config["portal_ip_addresses"]:
-                        inactive_portal_ip.remove(portal_ip_address)
-                    remote_gw_config['gateway_ip_list'] = self.gateway_ip_list
-                    remote_gw_config['tpgs'] = len(self.tpg_list)
-                    remote_gw_config['inactive_portal_ips'] = inactive_portal_ip
-                    target_config['portals'][remote_gw] = remote_gw_config
-
-                # Add the new gw
-                inactive_portal_ip = list(self.gateway_ip_list)
-                for active_portal_ip in self.active_portal_ips:
-                    inactive_portal_ip.remove(active_portal_ip)
-
-                portal_metadata = {"tpgs": len(self.tpg_list),
-                                   "gateway_ip_list": self.gateway_ip_list,
-                                   "portal_ip_addresses": self.active_portal_ips,
-                                   "inactive_portal_ips": inactive_portal_ip}
-                target_config['portals'][local_gw] = portal_metadata
-                target_config['ip_list'] = self.gateway_ip_list
-
-                config.update_item("targets", self.iqn, target_config)
-                self.config_updated = True
-
-            if self.config_updated:
-                config.commit()
-
-        elif mode == 'map':
-
-            if self.exists():
-
-                self.load_config()
-
-                self.map_luns(config)
+                if self.error:
+                    # return to caller, with error state set
+                    return
 
                 target_config = config.config["targets"][self.iqn]
                 self.update_acl(target_config['acl_enabled'])
 
-            else:
-                self.error = True
-                self.error_msg = ("Attempted to map to a gateway '{}' that "
-                                  "hasn't been defined yet...out of order "
-                                  "steps?".format(self.iqn))
-
-        elif mode == 'init':
-
-            # init mode just creates the iscsi target definition and updates
-            # the config object. It is used by the CLI only
-            if self.exists():
-                self.logger.info("GWTarget init request skipped - target "
-                                 "already exists")
-
-            else:
-                # create the target
-                self.create_target()
-                # if error happens, we should never store this target to config
-                if self.error:
-                    return
-                seed_target = {
-                    'disks': {},
-                    'clients': {},
-                    'acl_enabled': True,
-                    'auth': {
-                        'username': '',
-                        'password': '',
-                        'password_encryption_enabled': False,
-                        'mutual_username': '',
-                        'mutual_password': '',
-                        'mutual_password_encryption_enabled': False},
-                    'portals': {},
-                    'groups': {},
-                    'controls': {}
-                }
-                config.add_item("targets", self.iqn, seed_target)
-                config.commit()
-
                 discovery_auth_config = config.config['discovery_auth']
                 Discovery.set_discovery_auth_lio(discovery_auth_config['username'],
                                                  discovery_auth_config['password'],
-                                                 discovery_auth_config[
-                                                     'password_encryption_enabled'],
+                                                 discovery_auth_config['password_encryption_enabled'],
                                                  discovery_auth_config['mutual_username'],
                                                  discovery_auth_config['mutual_password'],
                                                  discovery_auth_config[
                                                      'mutual_password_encryption_enabled'])
 
-        elif mode == 'clearconfig':
-            # Called by API from CLI clearconfig command
-            if self.exists():
-                self.load_config()
-                self.clear_config(config)
-                if self.error:
-                    return
-            target_config = config.config["targets"][self.iqn]
-            if len(target_config['portals']) == 0:
-                config.del_item('targets', self.iqn)
-            else:
-                gw_ips = target_config['portals'][local_gw]['portal_ip_addresses']
+                gateway_group = config.config["gateways"].keys()
+                if "ip_list" not in target_config:
+                    target_config['ip_list'] = self.gateway_ip_list
+                    config.update_item("targets", self.iqn, target_config)
+                    self.config_updated = True
 
-                target_config['portals'].pop(local_gw)
+                if self.controls != target_config.get('controls', {}):
+                    target_config['controls'] = self.controls.copy()
+                    config.update_item("targets", self.iqn, target_config)
+                    self.config_updated = True
 
-                ip_list = target_config['ip_list']
-                for gw_ip in gw_ips:
-                    ip_list.remove(gw_ip)
-                if len(ip_list) > 0 and len(target_config['portals'].keys()) > 0:
-                    config.update_item('targets', self.iqn, target_config)
+                if local_gw not in gateway_group:
+                    gateway_metadata = {"active_luns": 0}
+                    config.add_item("gateways", local_gw)
+                    config.update_item("gateways", local_gw, gateway_metadata)
+                    self.config_updated = True
+
+                if local_gw not in target_config['portals']:
+                    # Update existing gws with the new gw
+                    for remote_gw, remote_gw_config in target_config['portals'].items():
+                        if remote_gw_config['gateway_ip_list'] == self.gateway_ip_list:
+                            continue
+
+                        inactive_portal_ip = list(self.gateway_ip_list)
+                        for portal_ip_address in remote_gw_config["portal_ip_addresses"]:
+                            inactive_portal_ip.remove(portal_ip_address)
+                        remote_gw_config['gateway_ip_list'] = self.gateway_ip_list
+                        remote_gw_config['tpgs'] = len(self.tpg_list)
+                        remote_gw_config['inactive_portal_ips'] = inactive_portal_ip
+                        target_config['portals'][remote_gw] = remote_gw_config
+
+                    # Add the new gw
+                    inactive_portal_ip = list(self.gateway_ip_list)
+                    for active_portal_ip in self.active_portal_ips:
+                        inactive_portal_ip.remove(active_portal_ip)
+
+                    portal_metadata = {"tpgs": len(self.tpg_list),
+                                       "gateway_ip_list": self.gateway_ip_list,
+                                       "portal_ip_addresses": self.active_portal_ips,
+                                       "inactive_portal_ips": inactive_portal_ip}
+                    target_config['portals'][local_gw] = portal_metadata
+                    target_config['ip_list'] = self.gateway_ip_list
+
+                    config.update_item("targets", self.iqn, target_config)
+                    self.config_updated = True
+
+                if self.config_updated:
+                    config.commit()
+
+            elif mode == 'map':
+
+                if self.exists():
+
+                    self.load_config()
+
+                    self.map_luns(config)
+
+                    target_config = config.config["targets"][self.iqn]
+                    self.update_acl(target_config['acl_enabled'])
+
                 else:
-                    # no more portals in the list, so delete the target
+                    self.error = True
+                    self.error_msg = ("Attempted to map to a gateway '{}' that "
+                                      "hasn't been defined yet...out of order "
+                                      "steps?".format(self.iqn))
+
+            elif mode == 'init':
+
+                # init mode just creates the iscsi target definition and updates
+                # the config object. It is used by the CLI only
+                if self.exists():
+                    self.logger.info("GWTarget init request skipped - target "
+                                     "already exists")
+
+                else:
+                    # create the target
+                    self.create_target()
+                    # if error happens, we should never store this target to config
+                    if self.error:
+                        return
+                    seed_target = {
+                        'disks': {},
+                        'clients': {},
+                        'acl_enabled': True,
+                        'auth': {
+                            'username': '',
+                            'password': '',
+                            'password_encryption_enabled': False,
+                            'mutual_username': '',
+                            'mutual_password': '',
+                            'mutual_password_encryption_enabled': False},
+                        'portals': {},
+                        'groups': {},
+                        'controls': {}
+                    }
+                    config.add_item("targets", self.iqn, seed_target)
+                    config.commit()
+
+                    discovery_auth_config = config.config['discovery_auth']
+                    Discovery.set_discovery_auth_lio(discovery_auth_config['username'],
+                                                     discovery_auth_config['password'],
+                                                     discovery_auth_config[
+                                                         'password_encryption_enabled'],
+                                                     discovery_auth_config['mutual_username'],
+                                                     discovery_auth_config['mutual_password'],
+                                                     discovery_auth_config[
+                                                         'mutual_password_encryption_enabled'])
+
+            elif mode == 'clearconfig':
+                # Called by API from CLI clearconfig command
+                if self.exists():
+                    self.load_config()
+                    self.clear_config(config)
+                    if self.error:
+                        return
+                target_config = config.config["targets"][self.iqn]
+                if len(target_config['portals']) == 0:
                     config.del_item('targets', self.iqn)
+                else:
+                    gw_ips = target_config['portals'][local_gw]['portal_ip_addresses']
 
-                remove_gateway = True
-                for _, target in config.config["targets"].items():
-                    if local_gw in target['portals']:
-                        remove_gateway = False
-                        break
+                    target_config['portals'].pop(local_gw)
 
-                if remove_gateway:
-                    # gateway is no longer used, so delete it
-                    config.del_item('gateways', local_gw)
+                    ip_list = target_config['ip_list']
+                    for gw_ip in gw_ips:
+                        ip_list.remove(gw_ip)
+                    if len(ip_list) > 0 and len(target_config['portals'].keys()) > 0:
+                        config.update_item('targets', self.iqn, target_config)
+                    else:
+                        # no more portals in the list, so delete the target
+                        config.del_item('targets', self.iqn)
 
-            config.commit()
+                    remove_gateway = True
+                    for _, target in config.config["targets"].items():
+                        if local_gw in target['portals']:
+                            remove_gateway = False
+                            break
+
+                    if remove_gateway:
+                        # gateway is no longer used, so delete it
+                        config.del_item('gateways', local_gw)
+    
+                config.commit()
 
     @staticmethod
     def get_num_sessions(target_iqn):
