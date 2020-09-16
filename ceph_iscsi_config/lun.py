@@ -369,62 +369,63 @@ class LUN(GWObject):
             self.config.commit()
 
     def unmap_lun(self, target_iqn):
-        local_gw = this_host()
-        self.logger.info("LUN unmap request received, config commit to be "
-                         "performed by {}".format(self.allocating_host))
+        with self.config:
+            local_gw = this_host()
+            self.logger.info("LUN unmap request received, config commit to be "
+                             "performed by {}".format(self.allocating_host))
 
-        target_config = self.config.config['targets'][target_iqn]
+            target_config = self.config.config['targets'][target_iqn]
 
-        # First ensure the LUN is not in use
-        clients = target_config['clients']
-        for client_iqn in clients:
-            client_luns = clients[client_iqn]['luns'].keys()
-            if self.config_key in client_luns:
-                self.error = True
-                self.error_msg = ("Unable to delete {} - allocated to {}"
-                                  .format(self.config_key, client_iqn))
-                self.logger.warning(self.error_msg)
+            # First ensure the LUN is not in use
+            clients = target_config['clients']
+            for client_iqn in clients:
+                client_luns = clients[client_iqn]['luns'].keys()
+                if self.config_key in client_luns:
+                    self.error = True
+                    self.error_msg = ("Unable to delete {} - allocated to {}"
+                                      .format(self.config_key, client_iqn))
+                    self.logger.warning(self.error_msg)
+                    return
+
+            # Check that the LUN is in LIO - if not there is nothing to do for
+            # this request
+            lun = self.lio_stg_object()
+            if not lun:
                 return
 
-        # Check that the LUN is in LIO - if not there is nothing to do for
-        # this request
-        lun = self.lio_stg_object()
-        if not lun:
-            return
+            # Now we know the request is for a LUN in LIO, and it's not masked
+            # to a client
+            self.remove_dev_from_lio()
+            if self.error:
+                return
 
-        # Now we know the request is for a LUN in LIO, and it's not masked
-        # to a client
-        self.remove_dev_from_lio()
-        if self.error:
-            return
+            if local_gw == self.allocating_host:
+                # by using the allocating host we ensure the delete is not
+                # issue by several hosts when initiated through ansible
 
-        if local_gw == self.allocating_host:
-            # by using the allocating host we ensure the delete is not
-            # issue by several hosts when initiated through ansible
+                target_config['disks'].pop(self.config_key)
+                self.config.update_item("targets", target_iqn, target_config)
 
-            target_config['disks'].pop(self.config_key)
-            self.config.update_item("targets", target_iqn, target_config)
+                # determine which host was the path owner
+                disk_owner = self.config.config['disks'][self.config_key].get('owner')
+                if disk_owner:
+                    # update the active_luns count for gateway that owned this
+                    # lun
+                    gw_metadata = self.config.config['gateways'][disk_owner]
+                    if gw_metadata['active_luns'] > 0:
+                        gw_metadata['active_luns'] -= 1
 
-            # determine which host was the path owner
-            disk_owner = self.config.config['disks'][self.config_key].get('owner')
-            if disk_owner:
-                # update the active_luns count for gateway that owned this
-                # lun
-                gw_metadata = self.config.config['gateways'][disk_owner]
-                if gw_metadata['active_luns'] > 0:
-                    gw_metadata['active_luns'] -= 1
+                        self.config.update_item('gateways',
+                                                disk_owner,
+                                                gw_metadata)
 
-                    self.config.update_item('gateways',
-                                            disk_owner,
-                                            gw_metadata)
+                disk_metadata = self.config.config['disks'][self.config_key]
+                if 'owner' in disk_metadata:
+                    del disk_metadata['owner']
+                    self.logger.debug("{} owner deleted".format(self.config_key))
+                self.config.update_item("disks", self.config_key, disk_metadata)
 
-            disk_metadata = self.config.config['disks'][self.config_key]
-            if 'owner' in disk_metadata:
-                del disk_metadata['owner']
-                self.logger.debug("{} owner deleted".format(self.config_key))
-            self.config.update_item("disks", self.config_key, disk_metadata)
-
-            self.config.commit()
+                self.config.commit()
 
     def _get_next_lun_id(self, target_disks):
         lun_ids_in_use = [t['lun_id'] for t in target_disks.values()]
@@ -434,31 +435,32 @@ class LUN(GWObject):
         return lun_id_candidate
 
     def map_lun(self, gateway, owner, disk, lun_id=None):
-        target_config = self.config.config['targets'][gateway.iqn]
-        disk_metadata = self.config.config['disks'][disk]
-        disk_metadata['owner'] = owner
-        self.config.update_item("disks", disk, disk_metadata)
+        with self.config:
+            target_config = self.config.config['targets'][gateway.iqn]
+            disk_metadata = self.config.config['disks'][disk]
+            disk_metadata['owner'] = owner
+            self.config.update_item("disks", disk, disk_metadata)
 
-        target_disk_config = target_config['disks'].get(disk)
-        if not target_disk_config:
-            if lun_id is None:
-                lun_id = self._get_next_lun_id(target_config['disks'])
-            target_config['disks'][disk] = {
-                'lun_id': lun_id
-            }
-        self.config.update_item("targets", gateway.iqn, target_config)
+            target_disk_config = target_config['disks'].get(disk)
+            if not target_disk_config:
+                if lun_id is None:
+                    lun_id = self._get_next_lun_id(target_config['disks'])
+                target_config['disks'][disk] = {
+                    'lun_id': lun_id
+                }
+            self.config.update_item("targets", gateway.iqn, target_config)
 
-        gateway_dict = self.config.config['gateways'][owner]
-        gateway_dict['active_luns'] += 1
-        self.config.update_item('gateways', owner, gateway_dict)
+            gateway_dict = self.config.config['gateways'][owner]
+            gateway_dict['active_luns'] += 1
+            self.config.update_item('gateways', owner, gateway_dict)
 
-        so = self.allocate()
-        if self.error:
-            raise CephiSCSIError(self.error_msg)
+            so = self.allocate()
+            if self.error:
+                raise CephiSCSIError(self.error_msg)
 
-        gateway.map_lun(self.config, so, target_config['disks'][disk])
-        if gateway.error:
-            raise CephiSCSIError(gateway.error_msg)
+            gateway.map_lun(self.config, so, target_config['disks'][disk])
+            if gateway.error:
+                raise CephiSCSIError(gateway.error_msg)
 
     def manage(self, desired_state):
 

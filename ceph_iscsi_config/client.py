@@ -147,9 +147,17 @@ class GWClient(GWObject):
 
         self.tpg_luns = self.get_images(self.tpg)
         current_map = dict(self.client_luns)
+        self.logger.warning("=======disks_config {}======".format(disks_config))
 
         for image in self.requested_images:
-            backstore_object_name = disks_config[image]['backstore_object_name']
+            backstore_object_name = disks_config[image].get('backstore_object_name')
+            if not backstore_object_name:
+                self.logger.warning("===========image with out backstore object name=========")
+                self.config.refresh()
+                disks_config_refresh = self.config.config.get('disk')
+                backstore_object_name = disks_config_refresh.get('backstore_object_name')
+                self.logger.warning("===========image with out backstore object name updated=========")
+
             if backstore_object_name in self.client_luns:
                 del current_map[backstore_object_name]
                 continue
@@ -164,6 +172,7 @@ class GWClient(GWObject):
                     self.logger.error("(Client.setup) missing image '{}' from "
                                       "the tpg".format(image))
                     return
+
 
         # 'current_map' should be empty, if not the remaining images need
         # to be removed from the client

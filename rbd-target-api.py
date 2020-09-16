@@ -500,6 +500,8 @@ def get_config():
     Examples:
     curl --insecure --user admin:admin -X GET http://192.168.122.69:5000/api/config
     """
+    t = threading.current_thread()
+    logger.warning("thread Name: '{}'".format(t.name))
 
     if request.method == 'GET':
         config.refresh()
@@ -588,6 +590,8 @@ def gateway(target_iqn=None, gateway_name=None):
     # running config to the new host. The downside is that this sync task
     # could take a while if there are 100's of disks/clients. Future work should
     # aim to make this synchronisation of the new gateway an async task
+    t = threading.current_thread()
+    logger.warning("thread Name: '{}'".format(t.name))
 
     try:
         target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
@@ -696,6 +700,9 @@ def _gateway(target_iqn=None, gateway_name=None):
     :param gateway_name: (str) gateway name, normally the DNS name
     **RESTRICTED**
     """
+    t = threading.current_thread()
+    logger.warning("thread Name: '{}'".format(t.name))
+
     config.refresh()
     target_config = config.config['targets'][target_iqn]
 
@@ -752,6 +759,8 @@ def target_disk(target_iqn=None):
     curl --insecure --user admin:admin -d disk=rbd.new2_1
         -X PUT https://192.168.122.69:5000/api/targetlun/iqn.2003-01.com.redhat.iscsi-gw:iscsi-igw
     """
+    t = threading.current_thread()
+    logger.warning("thread Name: '{}'".format(t.name))
 
     try:
         target_iqn, iqn_type = normalize_wwn(['iqn'], target_iqn)
@@ -759,6 +768,7 @@ def target_disk(target_iqn=None):
         err_str = "Invalid iqn {} - {}".format(target_iqn, err)
         return jsonify(message=err_str), 500
 
+    config.config = config.get_config()
     target_config = config.config['targets'][target_iqn]
 
     portals = [key for key in target_config['portals']]
@@ -864,6 +874,8 @@ def _target_disk(target_iqn=None):
     Internal Use ONLY
     **RESTRICTED**
     """
+    t = threading.current_thread()
+    logger.warning("thread Name: '{}'".format(t.name))
 
     config.refresh()
 
@@ -997,6 +1009,8 @@ def disk(pool, image):
     curl --insecure --user admin:admin -X GET https://192.168.122.69:5000/api/disk/rbd.new2_1
     curl --insecure --user admin:admin -X DELETE https://192.168.122.69:5000/api/disk/rbd.new2_1
     """
+    t = threading.current_thread()
+    logger.warning("thread Name: '{}'".format(t.name))
 
     local_gw = this_host()
     logger.debug("this host is {}".format(local_gw))
@@ -1152,8 +1166,11 @@ def _disk(pool, image):
     :param image: (str) image name
     **RESTRICTED**
     """
+    t = threading.current_thread()
+    logger.warning("thread Name: '{}'".format(t.name))
 
     image_id = '{}/{}'.format(pool, image)
+    logger.warning("========handle disk method for '{}'=======".format(image_id))
 
     config.refresh()
 
@@ -2575,6 +2592,25 @@ def _hostgroup(target_iqn, group_name):
             return jsonify(message=grp.error_msg), 400
 
 
+@app.route('/api/updateconfig', methods=['GET'])
+@requires_restricted_auth
+def update_config():
+    logger.warning("enter into the api/updateconfig")
+    get_config = config.get_config()
+    logger.debug(get_config)
+    disk_targets = config.config.get('targets').get('iqn.1993-08.org.opendev:01:a9aa4032d2c1').get('disks')
+    target_config = config.config.get('targets').get('iqn.1993-08.org.opendev:01:a9aa4032d2c1')
+
+    logger.warning(target_config)
+    target_config['disks'] = {}
+    logger.warning(target_config)
+
+    config.update_item('targets', 'iqn.1993-08.org.opendev:01:a9aa4032d2c1', target_config)
+    logger.warning(disk_targets)
+    config.commit('retain')
+    return jsonify(message="OK"), 200
+
+
 def iscsi_active():
     for x in ['/proc/net/tcp', '/proc/net/tcp6']:
         try:
@@ -2802,23 +2838,23 @@ class ConfigWatcher(threading.Thread):
             # within an api call)
             current_epoch = config.config['epoch']
 
-            # get the epoch from the xattr of the config object
-            try:
-                obj_epoch = int(ioctx.get_xattr('gateway.conf', 'epoch'))
-            except rados.ObjectNotFound:
-                # daemon is running prior to any config being created or it has
-                # skip the error, and
-                logger.warning("config object missing, recreating")
-                config.refresh()
-
-            else:
-                # if it's changed, refresh the local config to ensure a query
-                # to this node will return current state
-                if obj_epoch != current_epoch:
-                    logger.info("Change detected - internal {} / xattr {} "
-                                "refreshing".format(current_epoch,
-                                                    obj_epoch))
-                    config.refresh()
+            # # get the epoch from the xattr of the config object
+            # try:
+            #     obj_epoch = int(ioctx.get_xattr('gateway.conf', 'epoch'))
+            # except rados.ObjectNotFound:
+            #     # daemon is running prior to any config being created or it has
+            #     # skip the error, and
+            #     logger.warning("config object missing, recreating")
+            #     config.refresh()
+            #
+            # else:
+            #     # if it's changed, refresh the local config to ensure a query
+            #     # to this node will return current state
+            #     if obj_epoch != current_epoch:
+            #         logger.info("Change detected - internal {} / xattr {} "
+            #                     "refreshing".format(current_epoch,
+            #                                         obj_epoch))
+            #         config.refresh()
 
 
 def get_ssl_files_from_mon():

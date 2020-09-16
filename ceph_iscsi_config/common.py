@@ -107,11 +107,16 @@ class Config(object):
 
     def __enter__(self):
         if not self.config_locked:
+            self.logger.warning("======enter=====lock===000==")
             self.lock()
+        self.logger.warning("======enter=====lock=====")
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.config_locked:
+            self.logger.warning("------exit---000---lock------")
             self.unlock()
+        self.logger.warning("------exit------lock------")
 
     def _read_config_object(self, ioctx):
         """
@@ -179,9 +184,10 @@ class Config(object):
             else:
                 cfg_data = json.dumps(Config.seed_config)
 
-        self.logger.debug("(_get_rbd_config) config object contains '{}'".format(cfg_data))
+        # self.logger.debug("(_get_rbd_config) config object contains '{}'".format(cfg_data))
 
         cfg_dict = json.loads(cfg_data)
+        self.logger.debug("(_get_rbd_config) config object contains '{}'".format(cfg_dict))
 
         return cfg_dict
 
@@ -486,6 +492,8 @@ class Config(object):
         try:
             ioctx.unlock(self.config_name, 'lock', 'config')
             self.config_locked = False
+        except rados.ObjectNotFound:
+            self.logger.warning("(Config.unlock) no rados object found")
         except Exception:
             self.error = True
             self.error_msg = ("Unable to unlock {} - {}".format(self.config_name,
